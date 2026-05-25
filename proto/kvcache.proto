@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package kvcache;
+
+option go_package = "radixkv/proto";
+
+service KVCacheService {
+  rpc MatchPrefix (MatchPrefixRequest) returns (MatchPrefixResponse);
+  rpc Insert (InsertRequest) returns (InsertResponse);
+}
+
+message MatchPrefixRequest {
+  repeated int32 tokens = 1;
+}
+
+message MatchPrefixResponse {
+  int32 matched_length = 1;
+  repeated int32 block_ids = 2;
+}
+
+message InsertRequest {
+  repeated int32 tokens = 1;
+}
+
+message InsertResponse {
+  bool success = 1;
+  repeated int32 block_ids = 2;
+}

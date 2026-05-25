@@ -8,7 +8,7 @@
 
 RadixKV solves the memory wall in highly-concurrent Large Language Model deployments. By sharing identical prompt prefixes (like system prompts) across thousands of parallel branches, it drastically reduces VRAM usage and Time-To-First-Token (TTFT). It leverages physical memory paging concepts (similar to PagedAttention) while maintaining massive concurrency via lock-coupling.
 
-## 📖 Documentation
+## Documentation
 - [Architecture Deep Dive](docs/ARCHITECTURE.md) - Learn about the Control Plane, Radix Tree, and memory semantics.
 - [gRPC API Reference](docs/API.md) - Learn how to interface your Inference Engine with RadixKV.
 

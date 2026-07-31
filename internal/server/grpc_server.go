@@ -3,32 +3,37 @@ package server
 import (
 	"context"
 
-	"radixkv/internal/radix"
-	pb "radixkv/proto"
+	"prefixos/internal/interfaces"
+	"prefixos/internal/memory"
+	"prefixos/internal/radix"
+	pb "prefixos/proto/v1"
 )
 
-// KVCacheServer implements the KVCacheService gRPC interface.
-type KVCacheServer struct {
-	pb.UnimplementedKVCacheServiceServer
+// PrefixOSServer implements the PrefixOSService gRPC interface.
+type PrefixOSServer struct {
+	pb.UnimplementedPrefixOSServiceServer
 	tree *radix.Tree
+	bm   *memory.BlockManager
+	ev   interfaces.EvictionPolicy
+	pe   interfaces.PersistenceEngine
 }
 
-// NewKVCacheServer creates a new instance of KVCacheServer.
-func NewKVCacheServer(tree *radix.Tree) *KVCacheServer {
-	return &KVCacheServer{
+// NewPrefixOSServer creates a new instance of PrefixOSServer wiring memory, tree, eviction, and persistence.
+func NewPrefixOSServer(tree *radix.Tree, bm *memory.BlockManager, ev interfaces.EvictionPolicy, pe interfaces.PersistenceEngine) *PrefixOSServer {
+	return &PrefixOSServer{
 		tree: tree,
+		bm:   bm,
+		ev:   ev,
+		pe:   pe,
 	}
 }
 
 // MatchPrefix finds the longest shared sequence of tokens in the Radix Tree.
-func (s *KVCacheServer) MatchPrefix(ctx context.Context, req *pb.MatchPrefixRequest) (*pb.MatchPrefixResponse, error) {
+func (s *PrefixOSServer) MatchPrefix(ctx context.Context, req *pb.MatchPrefixRequest) (*pb.MatchPrefixResponse, error) {
 	matchedLen, blockIDs := s.tree.FindLongestPrefix(req.Tokens)
 
-	// Convert []int to []int32 for protobuf compatibility
 	pbBlockIDs := make([]int32, len(blockIDs))
-	for i, id := range blockIDs {
-		pbBlockIDs[i] = int32(id)
-	}
+	copy(pbBlockIDs, blockIDs)
 
 	return &pb.MatchPrefixResponse{
 		MatchedLength: int32(matchedLen),
@@ -37,19 +42,24 @@ func (s *KVCacheServer) MatchPrefix(ctx context.Context, req *pb.MatchPrefixRequ
 }
 
 // Insert allocates blocks and adds the new tokens into the Radix Tree.
-func (s *KVCacheServer) Insert(ctx context.Context, req *pb.InsertRequest) (*pb.InsertResponse, error) {
-	success, blockIDs := s.tree.Insert(req.Tokens)
+func (s *PrefixOSServer) Insert(ctx context.Context, req *pb.InsertRequest) (*pb.InsertResponse, error) {
+	success, blockIDs := s.tree.InsertTokens(req.Tokens)
 
 	var pbBlockIDs []int32
 	if success {
 		pbBlockIDs = make([]int32, len(blockIDs))
-		for i, id := range blockIDs {
-			pbBlockIDs[i] = int32(id)
+		copy(pbBlockIDs, blockIDs)
+
+		if s.pe != nil {
+			_ = s.pe.AppendWAL(interfaces.WALEntry{
+				Type:    1, // Insert
+				Payload: []byte("insert_op"),
+			})
 		}
 	}
 
 	return &pb.InsertResponse{
-		Success:  success,
-		BlockIds: pbBlockIDs,
+		Success:         success,
+		AllocatedBlocks: pbBlockIDs,
 	}, nil
 }

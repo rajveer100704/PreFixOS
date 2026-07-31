@@ -2,45 +2,55 @@ package radix
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"radixkv/internal/memory"
+	"prefixos/internal/interfaces"
+	"prefixos/internal/memory"
 )
 
-// Tree represents the prefix-aware Radix Tree for sharing tokens.
+// Tree represents a thread-safe Prefix Radix Tree.
 type Tree struct {
-	Root *RadixNode
-	mu   sync.RWMutex // Global tree lock for broader structural consistency if needed
-	bm   *memory.BlockManager
+	Root       *RadixNode
+	mu         sync.RWMutex
+	bm         *memory.BlockManager
+	nodeIDSeq  uint64
 }
 
-// NewTree initializes a new Radix Tree with a root node.
+// Ensure Tree implements interfaces.RadixTreeEngine
+var _ interfaces.RadixTreeEngine = (*Tree)(nil)
+
+// NewTree initializes a new Radix Tree.
 func NewTree(bm *memory.BlockManager) *Tree {
-	return &Tree{
-		Root: NewRadixNode([]int32{}, []int{}, nil),
-		bm:   bm,
+	t := &Tree{
+		bm: bm,
 	}
+	t.Root = NewRadixNode(t.nextNodeID(), []int32{}, []int32{}, nil)
+	return t
+}
+
+func (t *Tree) nextNodeID() uint64 {
+	return atomic.AddUint64(&t.nodeIDSeq, 1)
 }
 
 // allocateBlocksAndCopy allocates blocks from the manager and copies tokens into them.
-func (t *Tree) allocateBlocksAndCopy(tokens []int32) ([]int, error) {
+func (t *Tree) allocateBlocksAndCopy(tokens []int32) ([]int32, error) {
 	if len(tokens) == 0 {
 		return nil, nil
 	}
 
 	numBlocks := (len(tokens) + memory.BlockSize - 1) / memory.BlockSize
-	blocks := make([]int, 0, numBlocks)
+	blockIDs, err := t.bm.Allocate(numBlocks)
+	if err != nil {
+		return nil, err
+	}
 
-	for i := 0; i < numBlocks; i++ {
-		b, err := t.bm.Allocate()
+	for i, id := range blockIDs {
+		b, err := t.bm.GetBlock(id)
 		if err != nil {
-			// Rollback allocated blocks on OOM
-			for _, allocated := range blocks {
-				t.bm.Free(allocated)
-			}
+			_ = t.bm.Free(blockIDs)
 			return nil, err
 		}
-		blocks = append(blocks, b.ID)
 
 		start := i * memory.BlockSize
 		end := start + memory.BlockSize
@@ -51,18 +61,22 @@ func (t *Tree) allocateBlocksAndCopy(tokens []int32) ([]int, error) {
 		copy(b.Tokens[:], tokens[start:end])
 	}
 
-	return blocks, nil
+	return blockIDs, nil
 }
 
 // FindLongestPrefix searches the tree for the longest matching prefix of tokens.
-// Returns the matched length and the accumulated BlockIDs.
-func (t *Tree) FindLongestPrefix(tokens []int32) (int, []int) {
+func (t *Tree) FindLongestPrefix(tokens []int32) (int, []int32) {
+	return t.MatchPrefix(tokens)
+}
+
+// MatchPrefix implements interfaces.RadixTreeEngine
+func (t *Tree) MatchPrefix(tokens []int32) (int, []int32) {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
 	curr := t.Root
 	matchedLen := 0
-	var blockIDs []int
+	var matchedBlocks []int32
 
 	for matchedLen < len(tokens) {
 		curr.mu.RLock()
@@ -84,69 +98,70 @@ func (t *Tree) FindLongestPrefix(tokens []int32) (int, []int) {
 		}
 
 		if i > 0 {
-			blockIDs = append(blockIDs, child.BlockIDs...)
+			matchedBlocks = append(matchedBlocks, child.BlockIDs...)
 		}
 
-		// Update LRU timestamp since this node was accessed
 		child.LastUsed = time.Now()
-		
 		matchedLen += i
 		child.mu.Unlock()
 
 		if i < len(child.Tokens) {
-			// Diverged inside the child node
+			// Diverged inside child node
 			break
 		}
-		
+
 		curr = child
 	}
 
-	return matchedLen, blockIDs
+	return matchedLen, matchedBlocks
 }
 
-// Insert adds a sequence of tokens into the tree, splitting nodes if necessary.
-// Uses lock-coupling to allow concurrent reads while writes are isolated to localized branches.
-// Returns success (false if OOM) and a list of newly allocated BlockIDs.
-func (t *Tree) Insert(tokens []int32) (bool, []int) {
+// Insert implements interfaces.RadixTreeEngine
+func (t *Tree) Insert(tokens []int32, blockIDs []int32) error {
+	ok, _ := t.InsertTokens(tokens)
+	if !ok {
+		return memory.ErrOutOfMemory
+	}
+	return nil
+}
+
+// InsertTokens adds a sequence of tokens into the tree, allocating blocks as needed.
+func (t *Tree) InsertTokens(tokens []int32) (bool, []int32) {
 	if len(tokens) == 0 {
 		return true, nil
 	}
 
-	t.mu.RLock() // Protect root pointer
+	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	// Lock-coupling: start with root
 	t.Root.mu.Lock()
 	curr := t.Root
 	matchedLen := 0
-	var allocatedBlocks []int
+	var allocatedBlocks []int32
 
 	for matchedLen < len(tokens) {
 		targetToken := tokens[matchedLen]
 		child, exists := curr.Children[targetToken]
 
 		if !exists {
-			// Fast path: append new leaf
 			unmatched := tokens[matchedLen:]
 			blocks, err := t.allocateBlocksAndCopy(unmatched)
 			if err != nil {
 				curr.mu.Unlock()
-				return false, nil // OOM
+				return false, nil
 			}
 
-			newNode := NewRadixNode(unmatched, blocks, curr)
+			newNode := NewRadixNode(t.nextNodeID(), unmatched, blocks, curr)
 			curr.Children[targetToken] = newNode
 			curr.IsLeaf = false
 			allocatedBlocks = append(allocatedBlocks, blocks...)
-			
+
 			curr.mu.Unlock()
 			return true, allocatedBlocks
 		}
 
-		// Child exists, lock it before unlocking parent to ensure atomic traversal
 		child.mu.Lock()
 
-		// Find common prefix length
 		i := 0
 		for i < len(child.Tokens) && matchedLen+i < len(tokens) {
 			if child.Tokens[i] != tokens[matchedLen+i] {
@@ -156,14 +171,13 @@ func (t *Tree) Insert(tokens []int32) (bool, []int) {
 		}
 
 		if i == len(child.Tokens) {
-			// Matched entire child node, continue traversal
-			curr.mu.Unlock() // unlock parent
+			curr.mu.Unlock()
 			matchedLen += i
 			curr = child
 			continue
 		}
 
-		// We need to split the child node
+		// Split child node
 		grandchildTokens := make([]int32, len(child.Tokens)-i)
 		copy(grandchildTokens, child.Tokens[i:])
 
@@ -171,45 +185,40 @@ func (t *Tree) Insert(tokens []int32) (bool, []int) {
 		if err != nil {
 			child.mu.Unlock()
 			curr.mu.Unlock()
-			return false, nil // OOM
+			return false, nil
 		}
 
-		// Create grandchild
-		grandchild := NewRadixNode(grandchildTokens, grandchildBlocks, child)
+		grandchild := NewRadixNode(t.nextNodeID(), grandchildTokens, grandchildBlocks, child)
 		grandchild.Children = child.Children
 		for _, gcChild := range grandchild.Children {
-			gcChild.Parent = grandchild // update parent pointers
+			gcChild.Parent = grandchild
 		}
 		grandchild.IsLeaf = child.IsLeaf
-		grandchild.LastUsed = child.LastUsed // Preserve LRU state
+		grandchild.LastUsed = child.LastUsed
 
-		// Truncate the child
 		child.Tokens = child.Tokens[:i]
 		numKeptBlocks := (i + memory.BlockSize - 1) / memory.BlockSize
-		// Free the unused blocks that belonged to the suffix of the child
-		for j := numKeptBlocks; j < len(child.BlockIDs); j++ {
-			t.bm.Free(child.BlockIDs[j])
+
+		if numKeptBlocks < len(child.BlockIDs) {
+			_ = t.bm.Free(child.BlockIDs[numKeptBlocks:])
+			child.BlockIDs = child.BlockIDs[:numKeptBlocks]
 		}
-		child.BlockIDs = child.BlockIDs[:numKeptBlocks]
-		
-		// Reset child's children
+
 		child.Children = make(map[int32]*RadixNode)
 		child.Children[grandchildTokens[0]] = grandchild
 		child.IsLeaf = false
 		child.LastUsed = time.Now()
 
-		// Insert the new tokens if any
 		unmatched := tokens[matchedLen+i:]
 		if len(unmatched) > 0 {
 			newChildBlocks, err := t.allocateBlocksAndCopy(unmatched)
 			if err != nil {
-				// OOM. Tree split was successful but failed to append new tokens.
 				child.mu.Unlock()
 				curr.mu.Unlock()
 				return false, nil
 			}
 
-			newChild := NewRadixNode(unmatched, newChildBlocks, child)
+			newChild := NewRadixNode(t.nextNodeID(), unmatched, newChildBlocks, child)
 			child.Children[unmatched[0]] = newChild
 			allocatedBlocks = append(allocatedBlocks, newChildBlocks...)
 		}
@@ -221,4 +230,86 @@ func (t *Tree) Insert(tokens []int32) (bool, []int) {
 
 	curr.mu.Unlock()
 	return true, allocatedBlocks
+}
+
+// EvictLeaf implements interfaces.RadixTreeEngine
+func (t *Tree) EvictLeaf(nodeID uint64) ([]int32, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	var target *RadixNode
+	var findLeaf func(n *RadixNode)
+	findLeaf = func(n *RadixNode) {
+		if target != nil {
+			return
+		}
+		if n.ID == nodeID {
+			target = n
+			return
+		}
+		for _, c := range n.Children {
+			findLeaf(c)
+		}
+	}
+
+	findLeaf(t.Root)
+	if target == nil || target.Parent == nil {
+		return nil, nil
+	}
+
+	freed := make([]int32, len(target.BlockIDs))
+	copy(freed, target.BlockIDs)
+	_ = t.bm.Free(freed)
+
+	// Remove target from parent's children
+	for k, v := range target.Parent.Children {
+		if v.ID == nodeID {
+			delete(target.Parent.Children, k)
+			break
+		}
+	}
+	if len(target.Parent.Children) == 0 {
+		target.Parent.IsLeaf = true
+	}
+
+	return freed, nil
+}
+
+// TreeIterator implements interfaces.Iterator
+type TreeIterator struct {
+	nodes []*RadixNode
+	index int
+}
+
+func (it *TreeIterator) HasNext() bool {
+	return it.index < len(it.nodes)
+}
+
+func (it *TreeIterator) Next() ([]int32, []int32) {
+	if !it.HasNext() {
+		return nil, nil
+	}
+	n := it.nodes[it.index]
+	it.index++
+	return n.Tokens, n.BlockIDs
+}
+
+// Iterator implements interfaces.RadixTreeEngine
+func (t *Tree) Iterator() interfaces.Iterator {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var nodes []*RadixNode
+	var collect func(n *RadixNode)
+	collect = func(n *RadixNode) {
+		if n != t.Root {
+			nodes = append(nodes, n)
+		}
+		for _, c := range n.Children {
+			collect(c)
+		}
+	}
+	collect(t.Root)
+
+	return &TreeIterator{nodes: nodes, index: 0}
 }

@@ -1,0 +1,41 @@
+# PrefixOS Production Configuration
+
+server:
+  grpc_port: 50051
+  http_port: 8080
+  metrics_port: 9090
+  env: production
+
+security:
+  tls_enabled: false
+  cert_file: ""
+  key_file: ""
+  api_key_auth: false
+
+memory:
+  numa_enabled: true
+  slab_blocks: 1000000
+  size_class_bytes: 64
+  max_quota_mb_per_tenant: 4096
+  defrag_threshold: 0.35
+
+radix:
+  shards: 64
+  max_prefix_depth: 4096
+  rcu_reclamation_ms: 100
+
+eviction:
+  policy: adaptive # Options: adaptive, arc, tinylfu, lfu, lru
+  max_memory_percent: 85.0
+
+storage:
+  wal_enabled: true
+  wal_dir: "/var/lib/prefixos/wal"
+  snapshot_dir: "/var/lib/prefixos/snapshots"
+  sync_strategy: "EVERY_SEC"
+
+replication:
+  enabled: false
+  raft_port: 7000
+  node_id: "node-1"
+  peers: []

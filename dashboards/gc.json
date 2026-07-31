@@ -1,0 +1,13 @@
+{
+  "title": "PrefixOS - Go Runtime & GC Statistics",
+  "uid": "prefixos-gc",
+  "panels": [
+    {
+      "title": "Go GC Pause Latency",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "go_gc_duration_seconds", "legendFormat": "GC Duration" }
+      ]
+    }
+  ]
+}

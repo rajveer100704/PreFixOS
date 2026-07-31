@@ -5,8 +5,9 @@ import (
 	"sync"
 	"time"
 
-	"radixkv/internal/memory"
-	"radixkv/internal/radix"
+	"prefixos/internal/interfaces"
+	"prefixos/internal/memory"
+	"prefixos/internal/radix"
 )
 
 // LeafQueue implements heap.Interface and holds RadixNodes.
@@ -46,6 +47,8 @@ type TreeLRU struct {
 	bm    *memory.BlockManager
 }
 
+var _ interfaces.EvictionPolicy = (*TreeLRU)(nil)
+
 // NewTreeLRU initializes a new Tree-Aware LRU garbage collector with a Min-Heap.
 func NewTreeLRU(tree *radix.Tree, bm *memory.BlockManager) *TreeLRU {
 	lru := &TreeLRU{
@@ -57,8 +60,27 @@ func NewTreeLRU(tree *radix.Tree, bm *memory.BlockManager) *TreeLRU {
 	return lru
 }
 
+// SelectVictim selects the oldest leaf node ID for eviction.
+func (l *TreeLRU) SelectVictim() (uint64, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.queue.Len() == 0 {
+		return 0, ErrEmptyCache
+	}
+	node := heap.Pop(&l.queue).(*radix.RadixNode)
+	return node.ID, nil
+}
+
+// OnInsert adds a newly created node to the TreeLRU queue.
+func (l *TreeLRU) OnInsert(nodeID uint64, depth int, cost float64) {}
+
+// OnAccess updates the usage timestamp of a node.
+func (l *TreeLRU) OnAccess(nodeID uint64, hitCount uint64) {}
+
+// OnDelete removes a node from the TreeLRU queue.
+func (l *TreeLRU) OnDelete(nodeID uint64) {}
+
 // MarkAsLeaf adds a newly created or transitioned leaf node to the eviction queue.
-// The Radix Tree should call this when appending a new leaf or truncating a node.
 func (l *TreeLRU) MarkAsLeaf(node *radix.RadixNode) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -66,7 +88,6 @@ func (l *TreeLRU) MarkAsLeaf(node *radix.RadixNode) {
 }
 
 // UpdateUsage adjusts the priority of a leaf node if its LastUsed time changes.
-// To keep concurrency simple, we do a quick linear scan to fix the heap.
 func (l *TreeLRU) UpdateUsage(node *radix.RadixNode) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -79,61 +100,52 @@ func (l *TreeLRU) UpdateUsage(node *radix.RadixNode) {
 }
 
 // Evict pops the oldest node from the O(1) Min-Heap and evicts it.
-// If evicting a leaf leaves its parent with no children, the parent becomes a leaf
-// and is dynamically pushed into the Min-Heap.
 func (l *TreeLRU) Evict() bool {
 	var oldest *radix.RadixNode
 
-	// Loop to pop a valid leaf candidate without holding the global lock
 	for {
 		l.mu.Lock()
 		if l.queue.Len() == 0 {
 			l.mu.Unlock()
-			return false // Nothing to evict
+			return false
 		}
 		oldest = heap.Pop(&l.queue).(*radix.RadixNode)
 		l.mu.Unlock()
 
-		// Edge case: Node might have gained children after being pushed.
-		oldest.mu.RLock()
+		oldest.RLock()
 		isLeaf := len(oldest.Children) == 0
-		oldest.mu.RUnlock()
+		oldest.RUnlock()
 
 		if isLeaf {
 			break
 		}
-		// Discard the invalid leaf and keep searching
 	}
 
-	// Safely lock parent and child in top-down order to prevent deadlocks
 	var parent *radix.RadixNode
 	for {
 		parent = oldest.Parent
 		if parent == nil {
-			return false // Root cannot be evicted
+			return false
 		}
-		
-		parent.mu.Lock()
-		oldest.mu.Lock()
-		
+
+		parent.Lock()
+		oldest.Lock()
+
 		if oldest.Parent == parent {
-			break // Safe to proceed
+			break
 		}
-		
-		// Parent changed due to concurrent node split, unlock and retry
-		oldest.mu.Unlock()
-		parent.mu.Unlock()
+
+		oldest.Unlock()
+		parent.Unlock()
 	}
 
-	defer parent.mu.Unlock()
-	defer oldest.mu.Unlock()
+	defer parent.Unlock()
+	defer oldest.Unlock()
 
-	// Final verification under write lock
 	if len(oldest.Children) > 0 {
-		return false // Abort eviction, already discarded from heap
+		return false
 	}
 
-	// Delete the oldest node from its parent
 	var deletedKey int32
 	found := false
 	for k, v := range parent.Children {
@@ -148,17 +160,12 @@ func (l *TreeLRU) Evict() bool {
 		delete(parent.Children, deletedKey)
 	}
 
-	// If parent is now childless, it becomes a leaf!
 	if len(parent.Children) == 0 {
 		parent.IsLeaf = true
 		l.MarkAsLeaf(parent)
 	}
 
-	// Free VRAM metadata pointers
-	for _, blockID := range oldest.BlockIDs {
-		l.bm.Free(blockID)
-	}
-
+	_ = l.bm.Free(oldest.BlockIDs)
 	return true
 }
 

@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prefixos-cluster
+  namespace: default
+spec:
+  serviceName: prefixos-service
+  replicas: 3
+  selector:
+    matchLabels:
+      app: prefixos-cluster
+  template:
+    metadata:
+      labels:
+        app: prefixos-cluster
+    spec:
+      containers:
+        - name: prefixos
+          image: prefixos:latest
+          ports:
+            - containerPort: 50051
+            - containerPort: 8080
+            - containerPort: 7000
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/prefixos
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ "ReadWriteOnce" ]
+        resources:
+          requests:
+            storage: 20Gi

@@ -1,6 +1,10 @@
-# RadixKV Architecture
+# PrefixOS Architecture (Current State)
 
-RadixKV is fundamentally designed as a **Control Plane** for LLM orchestration. This document details the core subsystems that make RadixKV capable of supporting 100,000+ concurrent agent branches.
+> [!NOTE]
+> **Document Status**: Current Architecture Overview (v0.1 Implementation Baseline).  
+> For the target production architecture roadmap, see [TARGET_ARCHITECTURE.md](file:///c:/Users/BIT/PreFixOS/RadixKV/docs/TARGET_ARCHITECTURE.md).
+
+PrefixOS (formerly RadixKV) is fundamentally designed as a **Control Plane** for LLM orchestration. This document details the core subsystems that make PrefixOS capable of supporting 100,000+ concurrent agent branches.
 
 ## 1. Control Plane vs. Data Plane
 

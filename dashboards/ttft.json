@@ -1,0 +1,13 @@
+{
+  "title": "PrefixOS - Time-To-First-Token (TTFT) Savings",
+  "uid": "prefixos-ttft",
+  "panels": [
+    {
+      "title": "TTFT Latency Reduction %",
+      "type": "gauge",
+      "targets": [
+        { "expr": "prefixos_ttft_savings_percent", "legendFormat": "TTFT Savings %" }
+      ]
+    }
+  ]
+}

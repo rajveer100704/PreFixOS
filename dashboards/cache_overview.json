@@ -1,0 +1,26 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "Cache Hit vs Miss Ratio",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "sum(rate(prefixos_cache_hits_total[1m]))", "legendFormat": "Hits" },
+        { "expr": "sum(rate(prefixos_cache_misses_total[1m]))", "legendFormat": "Misses" }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["prefixos", "llm", "cache"],
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "PrefixOS - Cache Overview Dashboard",
+  "uid": "prefixos-cache-overview"
+}

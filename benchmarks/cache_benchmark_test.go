@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"radixkv/internal/memory"
-	"radixkv/internal/radix"
+	"prefixos/internal/memory"
+	"prefixos/internal/radix"
 )
 
 // BenchmarkAgenticTreeSearch simulates an LLM system cache doing Tree-of-Thought search.
@@ -40,7 +40,7 @@ func BenchmarkAgenticTreeSearch(b *testing.B) {
 			rootPrompt[j] = int32(j + 1)
 		}
 
-		_, blocks := tree.Insert(rootPrompt)
+		_, blocks := tree.InsertTokens(rootPrompt)
 		radixAllocatedBlocks += len(blocks)
 
 		// B. Branch into 50 sub-agents
@@ -54,7 +54,7 @@ func BenchmarkAgenticTreeSearch(b *testing.B) {
 				agentTokens[promptTokens+j] = int32(10000 + (a * 1000) + j)
 			}
 
-			_, blocks := tree.Insert(agentTokens)
+			_, blocks := tree.InsertTokens(agentTokens)
 			radixAllocatedBlocks += len(blocks)
 		}
 	}

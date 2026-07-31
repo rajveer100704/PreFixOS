@@ -1,0 +1,11 @@
+# Binaries & Executables
+bin/
+*.exe
+*.test
+*.prof
+*.pprof
+*.tmp
+*.zip
+data/
+snapshots/
+shards/

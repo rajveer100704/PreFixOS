@@ -5,14 +5,13 @@ import (
 	"time"
 )
 
-// RadixNode represents a node in the Radix Tree.
-// It uses a reader-writer mutex to allow concurrent reads on shared paths
-// while protecting writes during splits or appends.
+// RadixNode represents a node in the 64-way sharded Radix Tree.
 type RadixNode struct {
 	mu sync.RWMutex
 
+	ID       uint64
 	Tokens   []int32
-	BlockIDs []int
+	BlockIDs []int32
 	Children map[int32]*RadixNode
 	IsLeaf   bool
 	LastUsed time.Time
@@ -20,8 +19,9 @@ type RadixNode struct {
 }
 
 // NewRadixNode creates a new initialized RadixNode.
-func NewRadixNode(tokens []int32, blockIDs []int, parent *RadixNode) *RadixNode {
+func NewRadixNode(id uint64, tokens []int32, blockIDs []int32, parent *RadixNode) *RadixNode {
 	return &RadixNode{
+		ID:       id,
 		Tokens:   tokens,
 		BlockIDs: blockIDs,
 		Children: make(map[int32]*RadixNode),
@@ -30,3 +30,8 @@ func NewRadixNode(tokens []int32, blockIDs []int, parent *RadixNode) *RadixNode 
 		Parent:   parent,
 	}
 }
+
+func (n *RadixNode) Lock()    { n.mu.Lock() }
+func (n *RadixNode) Unlock()  { n.mu.Unlock() }
+func (n *RadixNode) RLock()   { n.mu.RLock() }
+func (n *RadixNode) RUnlock() { n.mu.RUnlock() }

@@ -1,53 +1,95 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"net"
-	"time"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"google.golang.org/grpc"
 
-	"radixkv/internal/eviction"
-	"radixkv/internal/memory"
-	"radixkv/internal/radix"
-	"radixkv/internal/server"
-	pb "radixkv/proto"
+	"prefixos/internal/config"
+	"prefixos/internal/eviction"
+	"prefixos/internal/memory"
+	"prefixos/internal/persistence"
+	"prefixos/internal/radix"
+	"prefixos/internal/server"
+	pb "prefixos/proto/v1"
 )
 
 func main() {
-	log.Println("Bootstrapping RadixKV Engine...")
+	configPath := flag.String("config", "configs/config.yaml", "Path to YAML configuration file")
+	flag.Parse()
 
-	// 1. Initialize Memory Manager (VRAM Simulator)
-	// We allocate 65,536 blocks. At 16 tokens/block, this is ~1M tokens capacity.
-	capacity := 65536
-	bm := memory.NewBlockManager(capacity)
+	log.Println("Bootstrapping PrefixOS Control Plane Engine...")
 
-	// 2. Initialize the Radix Tree
+	// 1. Load Configuration
+	cfg, err := config.LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("failed to load configuration: %v", err)
+	}
+
+	// 2. Initialize Memory Manager (Zero-Allocation Slab Allocator)
+	bm := memory.NewBlockManager(cfg.Memory.TotalBlocks)
+
+	// 3. Initialize Radix Tree Engine
 	tree := radix.NewTree(bm)
 
-	// 3. Initialize the Tree-Aware LRU Garbage Collector
-	lru := eviction.NewTreeLRU(tree, bm)
+	// 4. Initialize Eviction Policy
+	ev := eviction.NewLRUEvictionPolicy()
 
-	// Start the background GC. 
-	// In production, the trigger would check bm.FreeBlocks() against a low-watermark.
-	gcTrigger := func() bool {
-		// Mock trigger: normally returns bm.Available() < threshold
-		return false
+	// 5. Initialize Persistence Engine
+	var pe *persistence.Engine
+	if cfg.Persistence.Enabled {
+		var err error
+		pe, err = persistence.NewEngine("data", tree, bm, cfg.Persistence.SyncImmediate)
+		if err != nil {
+			log.Printf("warning: persistence engine initialization failed: %v", err)
+		} else {
+			defer pe.Close()
+		}
 	}
-	lru.RunBackgroundGarbageCollector(1*time.Second, gcTrigger)
 
-	// 4. Initialize gRPC Server
-	lis, err := net.Listen("tcp", ":50051")
+	// 6. Initialize gRPC Server
+	grpcAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.GRPCPort)
+	grpcLis, err := net.Listen("tcp", grpcAddr)
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("failed to listen on gRPC address %s: %v", grpcAddr, err)
 	}
 
 	grpcServer := grpc.NewServer()
-	kvServer := server.NewKVCacheServer(tree)
-	pb.RegisterKVCacheServiceServer(grpcServer, kvServer)
+	prefixOSServer := server.NewPrefixOSServer(tree, bm, ev, pe)
+	pb.RegisterPrefixOSServiceServer(grpcServer, prefixOSServer)
 
-	log.Printf("RadixKV gRPC Server listening on :50051 (Memory Capacity: %d blocks)", capacity)
-	if err := grpcServer.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
-	}
+	go func() {
+		log.Printf("PrefixOS gRPC Server listening on %s", grpcAddr)
+		if err := grpcServer.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
+			log.Fatalf("gRPC server error: %v", err)
+		}
+	}()
+
+	// 7. Initialize REST HTTP & Metrics Server
+	httpAddr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.HTTPPort)
+	httpServer := server.NewHTTPServer(httpAddr, tree, bm)
+
+	go func() {
+		log.Printf("PrefixOS REST & Metrics Server listening on http://%s", httpAddr)
+		if err := httpServer.Start(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	// Graceful shutdown handling
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down PrefixOS Control Plane Engine...")
+	grpcServer.GracefulStop()
+	_ = httpServer.Stop()
+	log.Println("PrefixOS cleanly stopped.")
 }

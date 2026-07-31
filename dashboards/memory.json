@@ -1,0 +1,14 @@
+{
+  "title": "PrefixOS - Memory & Slab Allocator Dashboard",
+  "uid": "prefixos-memory",
+  "panels": [
+    {
+      "title": "Slab Allocation & Fragmentation",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "prefixos_slab_blocks_allocated", "legendFormat": "Allocated Blocks" },
+        { "expr": "prefixos_slab_fragmentation_ratio", "legendFormat": "Fragmentation Ratio" }
+      ]
+    }
+  ]
+}

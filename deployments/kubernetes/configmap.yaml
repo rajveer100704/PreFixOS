@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prefixos-config
+  namespace: default
+data:
+  config.yaml: |
+    server:
+      grpc_port: 50051
+      http_port: 8080
+      metrics_port: 9090
+    memory:
+      numa_enabled: false
+      slab_blocks: 500000
+    radix:
+      shards: 64
+    eviction:
+      policy: adaptive

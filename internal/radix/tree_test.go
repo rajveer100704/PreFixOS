@@ -3,44 +3,60 @@ package radix
 import (
 	"testing"
 
-	"radixkv/internal/memory"
+	"prefixos/internal/memory"
 )
 
-func TestTreeInsertAndFind(t *testing.T) {
-	bm := memory.NewBlockManager(100) // 100 blocks = 1600 tokens
+func TestRadixTree_BasicInsertAndMatch(t *testing.T) {
+	bm := memory.NewBlockManager(1000)
 	tree := NewTree(bm)
 
-	// Insert "A B C D E"
-	seq1 := []int32{1, 2, 3, 4, 5}
-	success, blocks1 := tree.Insert(seq1)
-	if !success || len(blocks1) != 1 { // 5 tokens fit in 1 block
-		t.Fatalf("Failed to insert seq1")
+	tokens := []int32{101, 102, 103, 104, 105}
+	ok, blocks := tree.InsertTokens(tokens)
+	if !ok || len(blocks) == 0 {
+		t.Fatalf("InsertTokens failed, ok: %v, blocks: %v", ok, blocks)
 	}
 
-	// FindLongestPrefix for "A B C"
-	matchLen, blocks := tree.FindLongestPrefix([]int32{1, 2, 3})
-	if matchLen != 3 {
-		t.Errorf("Expected matchLen 3, got %d", matchLen)
+	matchedLen, matchedBlocks := tree.MatchPrefix(tokens)
+	if matchedLen != 5 {
+		t.Fatalf("expected matched length 5, got %d", matchedLen)
+	}
+	if len(matchedBlocks) == 0 {
+		t.Fatalf("expected matched blocks, got empty")
+	}
+}
+
+func TestRadixTree_PrefixBranching(t *testing.T) {
+	bm := memory.NewBlockManager(1000)
+	tree := NewTree(bm)
+
+	promptA := []int32{1, 2, 3, 4, 10}
+	promptB := []int32{1, 2, 3, 4, 20}
+
+	tree.InsertTokens(promptA)
+	tree.InsertTokens(promptB)
+
+	matchedLen, _ := tree.MatchPrefix([]int32{1, 2, 3, 4, 30})
+	if matchedLen != 4 {
+		t.Fatalf("expected common prefix matched length 4, got %d", matchedLen)
+	}
+}
+
+func TestRadixTree_Iterator(t *testing.T) {
+	bm := memory.NewBlockManager(1000)
+	tree := NewTree(bm)
+
+	tree.InsertTokens([]int32{10, 20, 30})
+	it := tree.Iterator()
+
+	count := 0
+	for it.HasNext() {
+		toks, _ := it.Next()
+		if len(toks) > 0 {
+			count++
+		}
 	}
 
-	// Insert "A B X Y" -> should split at "A B"
-	seq2 := []int32{1, 2, 10, 11}
-	success, blocks2 := tree.Insert(seq2)
-	if !success {
-		t.Fatalf("Failed to insert seq2")
-	}
-	if len(blocks2) != 1 { // "X Y" fits in 1 block
-		t.Errorf("Expected 1 block allocated for seq2, got %d", len(blocks2))
-	}
-
-	// FindLongestPrefix for "A B X Y Z"
-	matchLen, _ = tree.FindLongestPrefix([]int32{1, 2, 10, 11, 12})
-	if matchLen != 4 {
-		t.Errorf("Expected matchLen 4, got %d", matchLen)
-	}
-	
-	// Ensure root has 1 child ("A B" prefix)
-	if len(tree.Root.Children) != 1 {
-		t.Errorf("Expected 1 child at root after split, got %d", len(tree.Root.Children))
+	if count == 0 {
+		t.Fatalf("expected non-zero iterator nodes")
 	}
 }

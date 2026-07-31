@@ -1,0 +1,15 @@
+{
+  "title": "PrefixOS - Latency Percentiles Dashboard",
+  "uid": "prefixos-latency",
+  "panels": [
+    {
+      "title": "Lookup Latency (p50, p95, p99)",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(prefixos_lookup_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(prefixos_lookup_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(prefixos_lookup_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p99" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "title": "PrefixOS - 64 Shard Contention & Balance",
+  "uid": "prefixos-shards",
+  "panels": [
+    {
+      "title": "Lock Contention Wait Time Per Shard",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "prefixos_lock_contention_wait_seconds", "legendFormat": "Shard {{shard_id}}" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prefixos-deployment
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: prefixos
+  template:
+    metadata:
+      labels:
+        app: prefixos
+    spec:
+      containers:
+        - name: prefixos
+          image: prefixos:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+            - containerPort: 8080
+            - containerPort: 9090
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/configs
+      volumes:
+        - name: config-volume
+          configMap:
+            name: prefixos-config

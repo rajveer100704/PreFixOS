@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package prefixos.v1;
+
+option go_package = "prefixos/proto/v1;prefixosv1";
+
+// PrefixOS Control Plane Service
+service PrefixOSService {
+  // Match longest token prefix
+  rpc MatchPrefix (MatchPrefixRequest) returns (MatchPrefixResponse);
+  
+  // Store new token sequence and allocate physical slab blocks
+  rpc Insert (InsertRequest) returns (InsertResponse);
+
+  // Streaming prefix lookup for pipeline tokenization
+  rpc MatchPrefixStream (stream MatchPrefixRequest) returns (stream MatchPrefixResponse);
+
+  // Batch prefix lookup
+  rpc BatchLookup (BatchLookupRequest) returns (BatchLookupResponse);
+}
+
+message MatchPrefixRequest {
+  repeated int32 tokens = 1;
+  string tenant_id = 2;
+}
+
+message MatchPrefixResponse {
+  int32 matched_length = 1;
+  repeated int32 block_ids = 2;
+}
+
+message InsertRequest {
+  repeated int32 tokens = 1;
+  string tenant_id = 2;
+}
+
+message InsertResponse {
+  bool success = 1;
+  repeated int32 allocated_blocks = 2;
+}
+
+message BatchLookupRequest {
+  repeated MatchPrefixRequest requests = 1;
+}
+
+message BatchLookupResponse {
+  repeated MatchPrefixResponse responses = 1;
+}

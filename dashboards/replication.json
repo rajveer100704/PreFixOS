@@ -1,0 +1,13 @@
+{
+  "title": "PrefixOS - Raft Replication & Cluster Dashboard",
+  "uid": "prefixos-replication",
+  "panels": [
+    {
+      "title": "Raft Log Replication Lag",
+      "type": "timeseries",
+      "targets": [
+        { "expr": "prefixos_replication_lag_seconds", "legendFormat": "Replication Lag" }
+      ]
+    }
+  ]
+}

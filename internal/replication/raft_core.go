@@ -294,3 +294,10 @@ func (rn *RaftNode) Close() error {
 	}
 	return nil
 }
+
+// GetLastApplied returns the highest log index applied to the state machine.
+func (rn *RaftNode) GetLastApplied() uint64 {
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+	return rn.lastApplied
+}

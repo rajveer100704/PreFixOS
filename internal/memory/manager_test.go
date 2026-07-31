@@ -65,11 +65,15 @@ func TestBlockManager_CompactAndNUMA(t *testing.T) {
 	}
 
 	// Allocate and free in non-sequential order
-	ids, _ := bm.Allocate(10)
-	bm.Free([]int32{ids[2], ids[5], ids[7]})
-
-	_, err := bm.Compact()
+	ids, err := bm.Allocate(10)
 	if err != nil {
+		t.Fatalf("Allocate failed: %v", err)
+	}
+	if err := bm.Free([]int32{ids[2], ids[5], ids[7]}); err != nil {
+		t.Fatalf("Free failed: %v", err)
+	}
+
+	if _, err = bm.Compact(); err != nil {
 		t.Fatalf("Compact failed: %v", err)
 	}
 }

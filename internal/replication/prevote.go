@@ -1,7 +1,6 @@
 package replication
 
 import (
-	"sync"
 	"time"
 )
 
@@ -20,9 +19,7 @@ type PreVoteReply struct {
 }
 
 // PreVoteManager prevents re-joining partitioned nodes from causing disruptive elections.
-type PreVoteManager struct {
-	mu sync.Mutex
-}
+type PreVoteManager struct{}
 
 // NewPreVoteManager initializes a new PreVote manager instance.
 func NewPreVoteManager() *PreVoteManager {

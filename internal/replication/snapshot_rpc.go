@@ -25,10 +25,10 @@ type InstallSnapshotReply struct {
 
 // SnapshotStreamer manages resumable chunked snapshot reception for lagging followers.
 type SnapshotStreamer struct {
-	mu          sync.Mutex
-	dataDir     string
-	activeID    string
-	tempFile    *os.File
+	mu           sync.Mutex
+	dataDir      string
+	activeID     string
+	tempFile     *os.File
 	bytesWritten uint64
 }
 
@@ -50,6 +50,7 @@ func (ss *SnapshotStreamer) ReceiveChunk(args *InstallSnapshotArgs) error {
 			_ = ss.tempFile.Close()
 			_ = os.Remove(ss.tempFile.Name())
 		}
+		ss.activeID = fmt.Sprintf("snapshot_%d_%d", args.LastIncludedIndex, args.LastIncludedTerm)
 		path := filepath.Join(ss.dataDir, fmt.Sprintf("snapshot_chunk_%d.tmp", args.LastIncludedIndex))
 		f, err := os.Create(path)
 		if err != nil {
@@ -77,4 +78,11 @@ func (ss *SnapshotStreamer) ReceiveChunk(args *InstallSnapshotArgs) error {
 	}
 
 	return nil
+}
+
+// GetActiveSnapshotInfo returns the current in-progress snapshot streaming activeID and bytesWritten count.
+func (ss *SnapshotStreamer) GetActiveSnapshotInfo() (string, uint64) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	return ss.activeID, ss.bytesWritten
 }
